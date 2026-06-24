@@ -6,7 +6,7 @@ import json
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Annotated, Any, Literal, TypedDict
+from typing import Annotated, Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_ollama import ChatOllama
@@ -14,12 +14,12 @@ from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
+from loop_controller import AgentState as BaseAgentState
+from loop_controller import parse_decision, route_after_decide
+from memory import memory_store
+from tools import get_tools
 
 from config import load_system_prompt, settings
-from loop_controller import AgentState as BaseAgentState
-from loop_controller import make_initial_state, parse_decision, route_after_decide
-from memory import memory_store
-from tools import get_tools, tools_by_name
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,6 @@ def observe(state: AgentState) -> dict:
     """Load relevant memories for the current goal."""
     logger.info("[%s] OBSERVE (iter %d)", state["goal_id"], state["iteration"])
     ctx = memory_store.format_context(state["goal"], goal_id=state["goal_id"], include_global=True)
-    recent = memory_store.search(state["goal"], goal_id=state["goal_id"], top_k=3)
     summary = state.get("last_action_summary", "Starting fresh iteration.")
     return {
         "memory_context": ctx,

@@ -9,11 +9,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import redis
+from task_payload import build_task_payload, goal_content_hash
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 from config import settings
-from task_payload import build_task_payload, goal_content_hash, new_goal_id
 
 logger = logging.getLogger(__name__)
 

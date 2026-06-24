@@ -11,7 +11,6 @@ import httpx
 import pandas as pd
 import redis
 import streamlit as st
-
 from task_submit import build_task_payload
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")

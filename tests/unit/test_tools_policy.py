@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
-
 from policy import (
     classify_shell_risk,
     is_docker_tool_enabled,

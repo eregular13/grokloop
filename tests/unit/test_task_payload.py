@@ -4,17 +4,15 @@ from __future__ import annotations
 
 import re
 
-from task_payload import build_task_payload as agent_build
-from task_payload import goal_content_hash, new_goal_id
-
-
 # Dashboard copy lives in dashboard/ — import via path hack for test
 import sys
 from pathlib import Path
 
+from task_payload import build_task_payload as agent_build
+from task_payload import goal_content_hash, new_goal_id
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "dashboard"))
 from task_submit import build_task_payload as dash_build  # noqa: E402
-
 
 REQUIRED_KEYS = frozenset(
     {"goal_id", "goal", "source", "goal_hash", "thread_id", "question_id", "created_at"}

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from loop_engine.budget import LoopBudget
 from loop_engine.engine import LoopEngine, parse_decision_text
 from loop_engine.events import InMemoryEventSink

@@ -10,13 +10,11 @@ import sys
 import time
 from datetime import datetime, timezone
 
-from langgraph.checkpoint.sqlite import SqliteSaver
-
 from agent_loop import compile_agent, log_cycle_event, make_initial_state
 from budget import BudgetConfig, BudgetManager
-from observability import RunObserver
-from config import load_system_prompt, settings
 from human_gate import new_question_id, process_awaiting_responses
+from langgraph.checkpoint.sqlite import SqliteSaver
+from observability import RunObserver
 from task_watcher import (
     dequeue_task,
     enqueue_task,
@@ -27,6 +25,8 @@ from task_watcher import (
     set_active_goal,
     start_task_watcher,
 )
+
+from config import load_system_prompt, settings
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),

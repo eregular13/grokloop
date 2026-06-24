@@ -8,8 +8,9 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from config import settings
 from task_watcher import Task, enqueue_task_front, list_awaiting_human, unpark_awaiting_human
+
+from config import settings
 
 logger = logging.getLogger(__name__)
 

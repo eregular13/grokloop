@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import subprocess
@@ -12,12 +11,9 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from langchain_core.tools import StructuredTool
-from pydantic import BaseModel, Field
-
-from config import settings
-from memory import memory_store
 from human_gate import new_question_id, write_question
+from langchain_core.tools import StructuredTool
+from memory import memory_store
 from policy import (
     is_docker_command_blocked,
     is_docker_tool_enabled,
@@ -27,6 +23,9 @@ from policy import (
     is_write_allowed,
     resolve_safe_path,
 )
+from pydantic import BaseModel, Field
+
+from config import settings
 
 logger = logging.getLogger(__name__)
 
