@@ -10,11 +10,13 @@ import sys
 import time
 from datetime import datetime, timezone
 
-from agent_loop import compile_agent, log_cycle_event, make_initial_state
+from agent_loop import compile_agent, make_initial_state
 from budget import BudgetConfig, BudgetManager
 from human_gate import new_question_id, process_awaiting_responses
 from langgraph.checkpoint.sqlite import SqliteSaver
-from observability import RunObserver
+from observability import RunObserver, log_cycle_event
+from runtime.factory import resolve_runtime_backend
+from runtime.routing import run_goal_for_task as _run_goal_for_task
 from task_watcher import (
     dequeue_task,
     enqueue_task,
@@ -59,7 +61,7 @@ DEFAULT_GOAL = (
 )
 
 
-def run_goal(agent, task, thread_id: str) -> str:
+def run_goal_langgraph(agent, task, thread_id: str) -> str:
     """Execute one full goal through the LangGraph loop."""
     config = {"configurable": {"thread_id": thread_id}}
     state = make_initial_state(task.goal_id, task.goal)
@@ -141,7 +143,6 @@ def heartbeat():
 
 
 def maybe_seed_default_goal() -> None:
-    """Seed standing goal only when queue is empty, nothing active, and enabled."""
     if not settings.seed_default_goal:
         return
     if queue_length() > 0 or get_active_goal() is not None:
@@ -151,15 +152,17 @@ def maybe_seed_default_goal() -> None:
     logger.info("Seeded default standing goal")
 
 
-def daemon_loop(agent) -> None:
+def daemon_loop(agent=None) -> None:
     """Main 24/7 loop: dequeue tasks, run goals, sleep."""
     observer = start_task_watcher()
     scan_pending_files()
     maybe_seed_default_goal()
 
+    backend = resolve_runtime_backend()
     last_heartbeat = 0.0
     logger.info(
-        "LocalGrokLoop daemon started. model=%s mode=%s docker_tool=%s",
+        "LocalGrokLoop daemon started. runtime=%s model=%s mode=%s docker_tool=%s",
+        backend,
         settings.ollama_model,
         settings.agent_mode,
         settings.enable_docker_tool,
@@ -182,8 +185,7 @@ def daemon_loop(agent) -> None:
                 continue
 
             logger.info("Processing goal %s: %s", task.goal_id, task.goal[:80])
-            thread_id = task.thread_id or f"goal_{task.goal_id}"
-            status = run_goal(agent, task, thread_id)
+            status = _run_goal_for_task(agent, task)
             logger.info("Goal %s finished: %s", task.goal_id, status)
 
             time.sleep(settings.loop_sleep_seconds)
@@ -206,6 +208,7 @@ def cli_status() -> None:
     else:
         print("No active goal.")
     print(f"Queue depth: {queue_length()}")
+    print(f"Runtime backend: {resolve_runtime_backend()}")
 
 
 def wait_for_services(max_wait: int = 120) -> None:
@@ -249,6 +252,13 @@ def main():
         return
 
     wait_for_services()
+
+    if settings.use_loop_engine:
+        logger.warning(
+            "USE_LOOP_ENGINE=true — experimental LoopEngine runtime (not production-ready)"
+        )
+        daemon_loop(agent=None)
+        return
 
     with SqliteSaver.from_conn_string(str(settings.checkpoint_db)) as checkpointer:
         agent = compile_agent(checkpointer)

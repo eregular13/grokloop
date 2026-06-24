@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import datetime, timezone
 from typing import Annotated, Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -302,14 +301,4 @@ def compile_agent(checkpointer: SqliteSaver | None = None):
     return graph.compile()
 
 
-def log_cycle_event(goal_id: str, event: str, data: dict | None = None) -> None:
-    """Append structured log line for monitoring."""
-    log_file = settings.log_dir / "agent_cycles.jsonl"
-    entry = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "goal_id": goal_id,
-        "event": event,
-        "data": data or {},
-    }
-    with open(log_file, "a", encoding="utf-8") as f:
-        f.write(json.dumps(entry) + "\n")
+from observability import log_cycle_event  # noqa: E402, F401 — re-export for callers

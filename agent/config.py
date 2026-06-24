@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     human_outbox: Path = Path("/human_outbox")
     project_path: Path = Path("/project")
 
+    # Runtime: loop_engine (experimental) vs langgraph (default)
+    use_loop_engine: bool = False
+
     # Agent mode: observe < edit < build < operator
     agent_mode: AgentMode = "edit"
     enable_docker_tool: bool = False
@@ -65,6 +68,12 @@ class Settings(BaseSettings):
     @property
     def checkpoint_db(self) -> Path:
         path = self.data_path / "checkpoints" / "agent_state.db"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
+
+    @property
+    def loop_engine_checkpoint_db(self) -> Path:
+        path = self.data_path / "checkpoints" / "loop_engine_state.db"
         path.parent.mkdir(parents=True, exist_ok=True)
         return path
 

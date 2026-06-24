@@ -49,7 +49,7 @@ Goal intake (CLI / tasks/*.txt / dashboard)
         ↓
 Redis task queue
         ↓
-LangGraph state machine (SQLite checkpoints)
+LangGraph state machine (default) OR LoopEngine runtime (experimental)
         ↓
 Ollama (local LLM) + tools + ChromaDB memory
         ↓
@@ -118,16 +118,18 @@ via narrow Protocol interfaces (`Planner`, `Actor`, `Reflector`, `ToolExecutor`,
 
 | Layer | Module | Role |
 |-------|--------|------|
-| **Loop engine** | `agent/loop_engine/` | Deterministic orchestration + budget + events |
-| **LangGraph daemon** | `agent/agent_loop.py` | Production adapter (Ollama + tools + checkpoints) |
+| **Loop engine (core)** | `agent/loop_engine/` | Pure orchestration + budget + events (no framework deps) |
+| **Runtime adapters** | `agent/runtime/` | Bridges engine interfaces to Ollama, tools, Chroma, Redis |
+| **LangGraph daemon** | `agent/agent_loop.py` | Default production path (`USE_LOOP_ENGINE=false`) |
 | **Policy** | `agent/policy.py` | Path + shell mode gating |
 
 Run engine tests (no external services):
 
 ```bash
 pip install -r agent/requirements.txt -r requirements-dev.txt
-pytest tests/unit/test_loop_engine.py -v
+pytest tests/unit/test_loop_engine.py tests/unit/test_runtime.py -v
 python examples/minimal_loop_engine.py
+python examples/runtime_loop_engine_fake.py
 ```
 
 Inspect a run (stub replay):
@@ -136,8 +138,29 @@ Inspect a run (stub replay):
 from loop_engine.replay import load_events, summarize_run
 ```
 
-LangGraph-specific code remains in `agent_loop.py` until adapters bridge engine interfaces
-to Ollama/Chroma/Redis.
+### Experimental runtime bridge
+
+Set `USE_LOOP_ENGINE=true` in `.env` to route goals through `agent/runtime/` adapters
+instead of LangGraph. **Default is `false`** — LangGraph remains the production path.
+
+```bash
+# .env
+USE_LOOP_ENGINE=true
+docker compose up -d agent
+```
+
+Known limitations (not production-ready):
+
+- Actor tool-call quality depends on Ollama model support for structured tool calls
+- Resume from human gate is wired but minimally exercised in production
+- LangGraph path is unchanged and remains the safe default
+
+Test the runtime bridge without live services:
+
+```bash
+python examples/runtime_loop_engine_fake.py
+pytest tests/unit/test_runtime.py -v
+```
 
 ## Project layout
 
@@ -145,7 +168,8 @@ to Ollama/Chroma/Redis.
 grokloop/
 ├── agent/
 │   ├── loop_engine/ # Deterministic testable loop core
-│   ├── agent_loop.py # LangGraph production daemon
+│   ├── runtime/     # Production adapters (Ollama, tools, Chroma, SQLite)
+│   ├── agent_loop.py # LangGraph production daemon (default)
 ├── dashboard/       # Streamlit UI
 ├── config/          # SearXNG settings
 ├── tasks/           # Drop goal .txt files here
@@ -164,6 +188,7 @@ Copy `.env.example` to `.env`. Key variables:
 |----------|---------|-------------|
 | `OLLAMA_MODEL` | `qwen3:14b` | Primary tool-calling model |
 | `OLLAMA_PLANNER_MODEL` | _(empty)_ | Separate planner model |
+| `USE_LOOP_ENGINE` | `false` | Experimental LoopEngine runtime (LangGraph default) |
 | `MAX_ITERATIONS_PER_GOAL` | `50` | Hard iteration cap |
 | `LOOP_SLEEP_SECONDS` | `30` | Pause between queued goals |
 | `SELF_EDIT_MODE` | `false` | Allow edits to project source |

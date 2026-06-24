@@ -2,14 +2,16 @@
 
 ## Overview
 
-GrokLoop has two loop layers:
+GrokLoop has three loop layers:
 
 1. **`agent/loop_engine/`** — pure, deterministic orchestration over Protocol interfaces.
    Fully testable with fakes. No LangGraph/Ollama/Redis/Chroma imports.
-2. **`agent/agent_loop.py`** — LangGraph production adapter with Ollama, ChromaDB,
-   SQLite checkpoints, and LangChain tools.
+2. **`agent/runtime/`** — production adapters implementing those interfaces (Ollama planner/actor/reflector,
+   `tools.py` executor, Chroma memory, SQLite checkpoints, JSONL events, human gate).
+   Enabled when `USE_LOOP_ENGINE=true` (experimental, not production-ready).
+3. **`agent/agent_loop.py`** — LangGraph production path (default when `USE_LOOP_ENGINE=false`).
 
-The daemon uses layer 2 today. Layer 1 is the contract layer 2 will converge toward.
+The daemon uses layer 3 by default. Layer 2 bridges layer 1 to live services without polluting the engine core.
 
 ## State machine
 
@@ -41,8 +43,10 @@ Evaluate stopping conditions (budget.py + decide node)
 | Component | Module | Responsibility |
 |-----------|--------|----------------|
 | **Model provider** | `langchain_ollama` | Sends LLM requests, normalizes responses |
-| **Loop engine** | `loop_engine/engine.py` | Deterministic phase orchestration |
-| **Loop controller (prod)** | `agent_loop.py` | LangGraph nodes, routing, checkpointing |
+| **Loop engine (core)** | `loop_engine/engine.py` | Deterministic phase orchestration |
+| **Runtime adapters** | `runtime/adapters.py`, `runtime/factory.py` | Bridge engine to Ollama/tools/Chroma/Redis |
+| **Loop controller (LangGraph)** | `agent_loop.py` | Default production path (`USE_LOOP_ENGINE=false`) |
+| **Loop runtime** | `runtime/loop_engine_runtime.py` | Experimental daemon path (`USE_LOOP_ENGINE=true`) |
 | **Tool registry** | `tools.py` | Typed tool definitions, argument schemas |
 | **Policy layer** | `tools.py` | Path restrictions, blocklists, sandbox |
 | **State store** | `memory.py`, SQLite checkpointer | Vector memory + graph checkpoints |
@@ -99,21 +103,32 @@ passes through typed validation and path/command policy before execution.
 
 ## Observability
 
-Each goal run receives a `run_id`. Each graph step emits structured events:
+Events append to `data/logs/agent_cycles.jsonl`. Two formats coexist:
+
+**LangGraph path** (legacy wrapper events):
+
+```json
+{"timestamp": "...", "goal_id": "...", "event": "goal_started", "data": {...}}
+```
+
+**LoopEngine path** (normalized phase events via `loop_engine.events.JsonlEventSink`):
 
 ```json
 {
-  "run_id": "14043fd7fd0f",
+  "timestamp": "...",
+  "run_id": "...",
+  "goal_id": "...",
   "step_id": 4,
-  "event": "cycle_step",
-  "node": "decide",
+  "phase": "decide",
+  "event": "continue",
   "status": "decided_continue",
-  "iteration": 3,
+  "decision": "continue",
   "duration_ms": 218
 }
 ```
 
-Events are appended to `data/logs/agent_cycles.jsonl`. Full prompts are not logged by default.
+The Streamlit dashboard loads JSONL generically (both formats display in the activity table).
+Full prompts are not logged by default.
 
 ## Loop engine interfaces
 

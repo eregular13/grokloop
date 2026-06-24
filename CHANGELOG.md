@@ -8,6 +8,13 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- `agent/runtime/` — feature-flagged runtime bridge (`USE_LOOP_ENGINE`, default `false`)
+  - Production adapters: Ollama planner/actor/reflector, tools executor, Chroma memory,
+    SQLite checkpoints (`loop_engine_state.db`), JSONL event sink, non-blocking human gate
+  - `runtime/factory.py` — `build_loop_engine(use_fakes=True)` for tests and examples
+  - `runtime/loop_engine_runtime.py` — daemon integration when flag enabled
+- `examples/runtime_loop_engine_fake.py` — no-service smoke demo via runtime factory
+- Runtime bridge unit tests (`tests/unit/test_runtime.py`)
 - `agent/loop_engine/` — deterministic testable loop engine (models, interfaces, engine, budget, events, replay, testing fakes)
 - 19 new loop engine tests + task payload parity tests
 - `agent/task_payload.py` + `dashboard/task_submit.py` UUID task semantics

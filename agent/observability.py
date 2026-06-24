@@ -56,3 +56,16 @@ class RunObserver:
         with open(self.log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
         return entry
+
+
+def log_cycle_event(goal_id: str, event: str, data: dict | None = None) -> None:
+    """Append legacy wrapper event for monitoring (LangGraph + runtime goal boundaries)."""
+    log_file = settings.log_dir / "agent_cycles.jsonl"
+    entry = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "goal_id": goal_id,
+        "event": event,
+        "data": data or {},
+    }
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry) + "\n")
