@@ -17,6 +17,12 @@ from pydantic import BaseModel, Field
 
 from config import settings
 from memory import memory_store
+from policy import (
+    is_docker_command_blocked,
+    is_git_command_blocked,
+    is_shell_command_blocked,
+    resolve_safe_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,25 +34,21 @@ if settings.self_edit_mode:
     _WRITABLE_ROOTS.append(settings.project_path.resolve())
 
 
-def _resolve_safe(path: str, *, must_exist: bool = False) -> Path:
-    """Resolve path and ensure it stays within allowed roots."""
-    p = Path(path)
-    if not p.is_absolute():
-        p = (settings.workspace_path / p).resolve()
-    else:
-        p = p.resolve()
-
-    allowed_roots = [settings.workspace_path.resolve()]
+def _allowed_roots() -> list[Path]:
+    roots = [settings.workspace_path.resolve()]
     if settings.self_edit_mode:
-        allowed_roots.append(settings.project_path.resolve())
-        allowed_roots.append(settings.data_path.resolve())
+        roots.append(settings.project_path.resolve())
+        roots.append(settings.data_path.resolve())
+    return roots
 
-    if not any(str(p).startswith(str(root)) for root in allowed_roots):
-        raise PermissionError(f"Path outside allowed workspace: {p}")
 
-    if must_exist and not p.exists():
-        raise FileNotFoundError(f"Path not found: {p}")
-    return p
+def _resolve_safe(path: str, *, must_exist: bool = False) -> Path:
+    return resolve_safe_path(
+        path,
+        workspace=settings.workspace_path,
+        allowed_roots=_allowed_roots(),
+        must_exist=must_exist,
+    )
 
 
 def _truncate(text: str, limit: int = 12000) -> str:
@@ -96,8 +98,7 @@ def run_shell(command: str, cwd: str = "", timeout: int | None = None) -> str:
         work_dir = settings.workspace_path
 
     timeout = timeout or settings.tool_timeout_seconds
-    dangerous = ["rm -rf /", "mkfs", ":(){", "dd if=", "> /dev/sd"]
-    if any(d in command for d in dangerous):
+    if is_shell_command_blocked(command):
         return "BLOCKED: Command matches dangerous pattern."
 
     try:
@@ -154,16 +155,14 @@ def run_python(code: str, timeout: int | None = None) -> str:
 
 def git_command(args: str) -> str:
     """Run a git command in the workspace. Destructive ops blocked."""
-    blocked = ["push --force", "reset --hard", "clean -fdx", "branch -D"]
-    if any(b in args for b in blocked):
+    if is_git_command_blocked(args):
         return "BLOCKED: Destructive git operation requires human approval."
     return run_shell(f"git {args}", cwd=str(settings.workspace_path))
 
 
 def docker_command(args: str) -> str:
     """Run docker CLI. Requires mounted docker.sock."""
-    blocked = ["rm -f $(docker ps", "system prune -a", "volume rm"]
-    if any(b in args for b in blocked):
+    if is_docker_command_blocked(args):
         return "BLOCKED: Destructive docker operation."
     return run_shell(f"docker {args}", timeout=180)
 

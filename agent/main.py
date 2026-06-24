@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from agent_loop import compile_agent, log_cycle_event, make_initial_state
+from budget import BudgetConfig, BudgetManager
+from observability import RunObserver
 from config import load_system_prompt, settings
 from human_gate import wait_for_human
 from task_watcher import (
@@ -59,6 +61,15 @@ def run_goal(agent, task, thread_id: str) -> str:
     config = {"configurable": {"thread_id": thread_id}}
     state = make_initial_state(task.goal_id, task.goal)
 
+    observer = RunObserver(task.goal_id)
+    budget = BudgetManager(
+        BudgetConfig(
+            max_iterations=settings.max_iterations_per_goal,
+            max_elapsed_seconds=settings.max_goal_elapsed_seconds,
+            max_consecutive_failures=settings.max_consecutive_failures,
+        )
+    )
+    observer.emit("goal_started", extra=task.to_dict())
     log_cycle_event(task.goal_id, "goal_started", task.to_dict())
     set_active_goal(task)
 
@@ -68,11 +79,24 @@ def run_goal(agent, task, thread_id: str) -> str:
             status = step_output.get("status", "")
             decision = step_output.get("decision", "")
             iteration = step_output.get("iteration", 0)
+            observer.emit(
+                "cycle_step",
+                status=status,
+                iteration=iteration,
+                extra={"decision": decision},
+            )
             log_cycle_event(
                 task.goal_id,
                 "cycle_step",
                 {"status": status, "decision": decision, "iteration": iteration},
             )
+
+            stop, stop_reason = budget.check(decision=decision or "continue")
+            if stop and stop_reason in ("max_iterations", "max_elapsed_time", "max_consecutive_failures"):
+                log_cycle_event(task.goal_id, "budget_exhausted", {"reason": stop_reason})
+                observer.emit("budget_exhausted", status=stop_reason)
+                final_status = stop_reason
+                break
 
             if decision == "ask_human":
                 question = step_output.get("human_question", "Need human input.")

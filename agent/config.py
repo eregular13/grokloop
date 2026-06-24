@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
-
-from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -35,6 +32,8 @@ class Settings(BaseSettings):
     loop_sleep_seconds: int = 30
     heartbeat_seconds: int = 60
     max_iterations_per_goal: int = 50
+    max_goal_elapsed_seconds: int | None = 3600
+    max_consecutive_failures: int = 5
     self_edit_mode: bool = False
     tool_timeout_seconds: int = 120
     log_level: str = "INFO"
@@ -62,9 +61,6 @@ class Settings(BaseSettings):
         path = self.data_path / "logs"
         path.mkdir(parents=True, exist_ok=True)
         return path
-
-
-DecisionType = Literal["continue", "done", "ask_human"]
 
 
 def load_system_prompt() -> str:
