@@ -1,0 +1,155 @@
+# LocalGrokLoop — 24/7 local autonomous agent stack
+# Usage: docker compose up --build -d
+
+name: localgrokloop
+
+x-agent-env: &agent-env
+  OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+  OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:14b}
+  OLLAMA_PLANNER_MODEL: ${OLLAMA_PLANNER_MODEL:-}
+  CHROMA_HOST: chromadb
+  CHROMA_PORT: "8000"
+  SEARXNG_URL: http://searxng:8080
+  REDIS_URL: redis://redis:6379/0
+  WORKSPACE_PATH: /workspace
+  TASKS_PATH: /tasks
+  DATA_PATH: /data
+  HUMAN_INBOX: /human_inbox
+  HUMAN_OUTBOX: /human_outbox
+  LOOP_SLEEP_SECONDS: ${LOOP_SLEEP_SECONDS:-30}
+  HEARTBEAT_SECONDS: ${HEARTBEAT_SECONDS:-60}
+  MAX_ITERATIONS_PER_GOAL: ${MAX_ITERATIONS_PER_GOAL:-50}
+  SELF_EDIT_MODE: ${SELF_EDIT_MODE:-false}
+  TOOL_TIMEOUT_SECONDS: ${TOOL_TIMEOUT_SECONDS:-120}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+
+services:
+  # ── Vector memory ──────────────────────────────────────────────
+  chromadb:
+    image: chromadb/chroma:1.0.15
+    restart: unless-stopped
+    volumes:
+      - ./data/chroma:/chroma/chroma
+    environment:
+      IS_PERSISTENT: "TRUE"
+      PERSIST_DIRECTORY: /chroma/chroma
+      ANONYMIZED_TELEMETRY: "FALSE"
+    ports:
+      - "8100:8000"
+    networks:
+      - loopnet
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 3 bash -c '</dev/tcp/127.0.0.1/8000' || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 30s
+
+  # ── Task queue / state cache ───────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - ./data/redis:/data
+    networks:
+      - loopnet
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ── Local web search (optional, no API keys) ───────────────────
+  searxng:
+    image: searxng/searxng:latest
+    restart: unless-stopped
+    volumes:
+      - ./config/searxng:/etc/searxng:rw
+    environment:
+      SEARXNG_BASE_URL: http://localhost:8888/
+    ports:
+      - "8888:8080"
+    networks:
+      - loopnet
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+
+  # ── Main agent daemon ──────────────────────────────────────────
+  agent:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      <<: *agent-env
+    volumes:
+      - ./workspace:/workspace
+      - ./tasks:/tasks
+      - ./data:/data
+      - ./human_inbox:/human_inbox
+      - ./human_outbox:/human_outbox
+      - ./agent:/app/agent_src:ro
+      # Mount project root so agent can self-edit when SELF_EDIT_MODE=true
+      - .:/project:rw
+      # Docker socket for container control (optional — disable if undesired)
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      chromadb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - loopnet
+    # Uncomment for NVIDIA GPU passthrough (Linux/WSL2 with nvidia-container-toolkit):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # ── Web dashboard ──────────────────────────────────────────────
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      DATA_PATH: /data
+      TASKS_PATH: /tasks
+      HUMAN_INBOX: /human_inbox
+      HUMAN_OUTBOX: /human_outbox
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:14b}
+    volumes:
+      - ./data:/data:ro
+      - ./tasks:/tasks
+      - ./human_inbox:/human_inbox
+      - ./human_outbox:/human_outbox
+      - ./workspace:/workspace:ro
+    ports:
+      - "8501:8501"
+    depends_on:
+      - redis
+      - agent
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - loopnet
+
+networks:
+  loopnet:
+    driver: bridge
+
+volumes: {}

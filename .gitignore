@@ -1,0 +1,13 @@
+.env
+data/chroma/*
+data/checkpoints/*
+data/logs/*
+data/redis/*
+!data/chroma/.gitkeep
+!data/checkpoints/.gitkeep
+!data/logs/.gitkeep
+tasks/processed/*
+human_inbox/processed/*
+__pycache__/
+*.pyc
+.venv/

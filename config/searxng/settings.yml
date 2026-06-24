@@ -1,0 +1,33 @@
+use_default_settings: true
+
+general:
+  instance_name: "LocalGrokLoop Search"
+  debug: false
+  privacypolicy_url: false
+  donation_url: false
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "en"
+  formats:
+    - html
+    - json
+
+server:
+  secret_key: "localgrokloop-searxng-secret-change-me"
+  limiter: false
+  image_proxy: false
+
+ui:
+  static_use_hash: true
+
+engines:
+  - name: google
+    disabled: true
+  - name: duckduckgo
+    disabled: false
+  - name: wikipedia
+    disabled: false
+  - name: brave
+    disabled: false
