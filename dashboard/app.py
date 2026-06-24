@@ -19,8 +19,27 @@ HUMAN_INBOX = Path(os.getenv("HUMAN_INBOX", "/human_inbox"))
 HUMAN_OUTBOX = Path(os.getenv("HUMAN_OUTBOX", "/human_outbox"))
 OLLAMA_URL = os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:14b")
+DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "")
 
 st.set_page_config(page_title="LocalGrokLoop", page_icon="🔄", layout="wide")
+
+
+def require_auth() -> bool:
+    """Simple local password gate. Bind dashboard to 127.0.0.1 in compose."""
+    if not DASHBOARD_PASSWORD:
+        st.sidebar.warning("No DASHBOARD_PASSWORD set — localhost only, no auth.")
+        return True
+    if st.session_state.get("authenticated"):
+        return True
+    pwd = st.sidebar.text_input("Dashboard password", type="password")
+    if st.sidebar.button("Unlock") and pwd == DASHBOARD_PASSWORD:
+        st.session_state["authenticated"] = True
+        st.rerun()
+    st.stop()
+    return False
+
+
+require_auth()
 
 
 @st.cache_resource

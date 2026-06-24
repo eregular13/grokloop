@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import re
 import signal
 import sys
 import time
@@ -15,11 +16,13 @@ from agent_loop import compile_agent, log_cycle_event, make_initial_state
 from budget import BudgetConfig, BudgetManager
 from observability import RunObserver
 from config import load_system_prompt, settings
-from human_gate import wait_for_human
+from human_gate import new_question_id, process_awaiting_responses
 from task_watcher import (
     dequeue_task,
     enqueue_task,
     get_active_goal,
+    park_awaiting_human,
+    queue_length,
     scan_pending_files,
     set_active_goal,
     start_task_watcher,
@@ -100,15 +103,11 @@ def run_goal(agent, task, thread_id: str) -> str:
 
             if decision == "ask_human":
                 question = step_output.get("human_question", "Need human input.")
-                log_cycle_event(task.goal_id, "human_requested", {"question": question})
-                response = wait_for_human(question, timeout_seconds=86400)
-                if response:
-                    # Re-queue with human guidance
-                    new_goal = f"{task.goal}\n\nHuman guidance: {response}"
-                    enqueue_task(new_goal, source="human_resume")
-                    final_status = "human_resumed"
-                else:
-                    final_status = "human_timeout"
+                match = re.search(r"question_id=([a-f0-9]+)", question)
+                qid = match.group(1) if match else new_question_id()
+                log_cycle_event(task.goal_id, "human_requested", {"question": question, "question_id": qid})
+                park_awaiting_human(task, question, qid)
+                final_status = "awaiting_human"
                 break
 
             if status == "completed":
@@ -134,7 +133,6 @@ def run_goal(agent, task, thread_id: str) -> str:
 
 
 def heartbeat():
-    """Write periodic heartbeat for monitoring."""
     hb_file = settings.log_dir / "heartbeat.json"
     hb_file.write_text(
         f'{{"timestamp": "{datetime.now(timezone.utc).isoformat()}", "status": "alive"}}',
@@ -142,16 +140,30 @@ def heartbeat():
     )
 
 
+def maybe_seed_default_goal() -> None:
+    """Seed standing goal only when queue is empty, nothing active, and enabled."""
+    if not settings.seed_default_goal:
+        return
+    if queue_length() > 0 or get_active_goal() is not None:
+        logger.info("Skipping default goal seed — queue non-empty or goal active")
+        return
+    enqueue_task(DEFAULT_GOAL, source="default_standing")
+    logger.info("Seeded default standing goal")
+
+
 def daemon_loop(agent) -> None:
     """Main 24/7 loop: dequeue tasks, run goals, sleep."""
     observer = start_task_watcher()
     scan_pending_files()
-
-    # Seed default standing goal if queue empty and no active work
-    enqueue_task(DEFAULT_GOAL, source="default_standing")
+    maybe_seed_default_goal()
 
     last_heartbeat = 0.0
-    logger.info("LocalGrokLoop daemon started. Model=%s", settings.ollama_model)
+    logger.info(
+        "LocalGrokLoop daemon started. model=%s mode=%s docker_tool=%s",
+        settings.ollama_model,
+        settings.agent_mode,
+        settings.enable_docker_tool,
+    )
     logger.info("System prompt loaded (%d chars)", len(load_system_prompt()))
 
     try:
@@ -161,12 +173,16 @@ def daemon_loop(agent) -> None:
                 heartbeat()
                 last_heartbeat = now
 
+            resumed = process_awaiting_responses()
+            if resumed:
+                logger.info("Resumed %d goal(s) from human responses", resumed)
+
             task = dequeue_task(block=True, timeout=settings.loop_sleep_seconds)
             if not task:
                 continue
 
             logger.info("Processing goal %s: %s", task.goal_id, task.goal[:80])
-            thread_id = f"goal_{task.goal_id}"
+            thread_id = task.thread_id or f"goal_{task.goal_id}"
             status = run_goal(agent, task, thread_id)
             logger.info("Goal %s finished: %s", task.goal_id, status)
 
@@ -189,12 +205,11 @@ def cli_status() -> None:
         print(f"Active: [{active.goal_id}] {active.goal[:100]}")
     else:
         print("No active goal.")
+    print(f"Queue depth: {queue_length()}")
 
 
 def wait_for_services(max_wait: int = 120) -> None:
-    """Block until ChromaDB and Redis are reachable."""
     import httpx
-
     from memory import get_memory_store
 
     deadline = time.time() + max_wait
@@ -235,7 +250,6 @@ def main():
 
     wait_for_services()
 
-    # Compile agent with SQLite checkpointer
     with SqliteSaver.from_conn_string(str(settings.checkpoint_db)) as checkpointer:
         agent = compile_agent(checkpointer)
         daemon_loop(agent)

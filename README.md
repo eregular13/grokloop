@@ -85,6 +85,11 @@ cp .env.example .env          # Linux/macOS
 docker compose up --build -d
 ```
 
+**Operator mode (dangerous — docker socket + project write):**
+```bash
+docker compose -f docker-compose.yml -f docker-compose.operator.yml up -d
+```
+
 ### Submit one goal
 
 ```bash
@@ -126,6 +131,34 @@ Copy `.env.example` to `.env`. Key variables:
 | `MAX_ITERATIONS_PER_GOAL` | `50` | Hard iteration cap |
 | `LOOP_SLEEP_SECONDS` | `30` | Pause between queued goals |
 | `SELF_EDIT_MODE` | `false` | Allow edits to project source |
+
+## Agent modes (safety tiers)
+
+| Mode | File writes | Shell | Python | Git commit | Docker |
+|------|-------------|-------|--------|------------|--------|
+| `observe` | No | read-only | No | No | No |
+| `edit` | workspace | low-risk only | Yes | read-only | No |
+| `build` | workspace | + pip/npm/make | Yes | yes | No |
+| `operator` | workspace + project* | all tiers | Yes | yes | Yes* |
+
+\* Requires `docker compose -f docker-compose.yml -f docker-compose.operator.yml up` and `ENABLE_DOCKER_TOOL=true`.
+
+**Default is `edit` mode** — no Docker socket, no project-root mount.
+
+## Threat model
+
+GrokLoop executes **model-proposed actions** on your machine. Treat model output as **untrusted**.
+
+| Risk | Default | Operator overlay |
+|------|---------|------------------|
+| Docker socket escape | Disabled | Explicit opt-in |
+| Project source modification | Blocked | `SELF_EDIT_MODE=true` |
+| LAN exposure | Ports bound to `127.0.0.1` | Same |
+| Dashboard queue injection | Localhost + optional password | Set `DASHBOARD_PASSWORD` |
+| Path traversal | `Path.relative_to()` containment | Same |
+| Shell injection | Mode-gated allowlist, not denylist-only | Same |
+
+**Do not run operator mode overnight unattended.**
 
 ## Out of scope (deliberately)
 

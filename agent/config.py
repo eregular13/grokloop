@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+AgentMode = Literal["observe", "edit", "build", "operator"]
 
 
 class Settings(BaseSettings):
@@ -28,15 +32,23 @@ class Settings(BaseSettings):
     human_outbox: Path = Path("/human_outbox")
     project_path: Path = Path("/project")
 
+    # Agent mode: observe < edit < build < operator
+    agent_mode: AgentMode = "edit"
+    enable_docker_tool: bool = False
+    self_edit_mode: bool = False
+
     # Loop tuning
     loop_sleep_seconds: int = 30
     heartbeat_seconds: int = 60
     max_iterations_per_goal: int = 50
     max_goal_elapsed_seconds: int | None = 3600
     max_consecutive_failures: int = 5
-    self_edit_mode: bool = False
+    seed_default_goal: bool = False
     tool_timeout_seconds: int = 120
     log_level: str = "INFO"
+
+    # Dashboard
+    dashboard_password: str = ""
 
     # Memory
     memory_collection: str = "localgrokloop_memory"

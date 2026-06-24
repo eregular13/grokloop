@@ -1,0 +1,15 @@
+# Operator overlay — EXPLICIT opt-in for dangerous capabilities.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.operator.yml up -d
+#
+# WARNING: Mounts host Docker socket and project root. Human approval required
+# for consequential actions. Do not run unattended.
+
+services:
+  agent:
+    environment:
+      SELF_EDIT_MODE: "true"
+      ENABLE_DOCKER_TOOL: "true"
+      AGENT_MODE: operator
+    volumes:
+      - .:/project:rw
+      - /var/run/docker.sock:/var/run/docker.sock

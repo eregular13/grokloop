@@ -48,7 +48,7 @@ def _bind_tools_llm() -> Any:
 def observe(state: AgentState) -> dict:
     """Load relevant memories for the current goal."""
     logger.info("[%s] OBSERVE (iter %d)", state["goal_id"], state["iteration"])
-    ctx = memory_store.format_context(state["goal"], goal_id=state["goal_id"])
+    ctx = memory_store.format_context(state["goal"], goal_id=state["goal_id"], include_global=True)
     recent = memory_store.search(state["goal"], goal_id=state["goal_id"], top_k=3)
     summary = state.get("last_action_summary", "Starting fresh iteration.")
     return {

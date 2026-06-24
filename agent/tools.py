@@ -17,10 +17,14 @@ from pydantic import BaseModel, Field
 
 from config import settings
 from memory import memory_store
+from human_gate import new_question_id, write_question
 from policy import (
     is_docker_command_blocked,
+    is_docker_tool_enabled,
     is_git_command_blocked,
-    is_shell_command_blocked,
+    is_python_exec_allowed,
+    is_shell_allowed,
+    is_write_allowed,
     resolve_safe_path,
 )
 
@@ -72,6 +76,8 @@ def read_file(path: str, offset: int = 0, limit: int = 500) -> str:
 
 def write_file(path: str, content: str, append: bool = False) -> str:
     """Write or append content to a file in the workspace."""
+    if not is_write_allowed(settings.agent_mode):
+        return "BLOCKED: File writes require AGENT_MODE=edit|build|operator."
     p = _resolve_safe(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     mode = "a" if append else "w"
@@ -98,8 +104,9 @@ def run_shell(command: str, cwd: str = "", timeout: int | None = None) -> str:
         work_dir = settings.workspace_path
 
     timeout = timeout or settings.tool_timeout_seconds
-    if is_shell_command_blocked(command):
-        return "BLOCKED: Command matches dangerous pattern."
+    allowed, reason = is_shell_allowed(command, settings.agent_mode)
+    if not allowed:
+        return f"BLOCKED: {reason}"
 
     try:
         result = subprocess.run(
@@ -125,6 +132,8 @@ def run_shell(command: str, cwd: str = "", timeout: int | None = None) -> str:
 
 def run_python(code: str, timeout: int | None = None) -> str:
     """Execute Python code in a subprocess with workspace on sys.path."""
+    if not is_python_exec_allowed(settings.agent_mode):
+        return "BLOCKED: Python execution requires AGENT_MODE=edit|build|operator."
     timeout = timeout or settings.tool_timeout_seconds
     with tempfile.NamedTemporaryFile(
         mode="w", suffix=".py", delete=False, dir=settings.workspace_path
@@ -155,13 +164,18 @@ def run_python(code: str, timeout: int | None = None) -> str:
 
 def git_command(args: str) -> str:
     """Run a git command in the workspace. Destructive ops blocked."""
-    if is_git_command_blocked(args):
-        return "BLOCKED: Destructive git operation requires human approval."
+    if is_git_command_blocked(args, settings.agent_mode):
+        return "BLOCKED: Git operation not allowed in current AGENT_MODE or requires human approval."
     return run_shell(f"git {args}", cwd=str(settings.workspace_path))
 
 
 def docker_command(args: str) -> str:
-    """Run docker CLI. Requires mounted docker.sock."""
+    """Run docker CLI. Requires operator mode + ENABLE_DOCKER_TOOL + socket mount."""
+    if not is_docker_tool_enabled(settings.enable_docker_tool, settings.agent_mode):
+        return (
+            "BLOCKED: docker_command requires AGENT_MODE=operator, ENABLE_DOCKER_TOOL=true, "
+            "and docker-compose.operator.yml overlay."
+        )
     if is_docker_command_blocked(args):
         return "BLOCKED: Destructive docker operation."
     return run_shell(f"docker {args}", timeout=180)
@@ -208,18 +222,12 @@ def search_memory(query: str, top_k: int = 5) -> str:
 
 
 def ask_human(question: str, context: str = "") -> str:
-    """Queue a question for human review. Loop pauses until response arrives."""
-    inbox = settings.human_outbox
-    inbox.mkdir(parents=True, exist_ok=True)
-    from datetime import datetime, timezone
-
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    payload = {"question": question, "context": context, "timestamp": ts}
-    out_path = inbox / f"question_{ts}.json"
-    out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    """Queue a question for human review. Goal is parked; worker continues other tasks."""
+    qid = new_question_id()
+    out_path = write_question(question, context=context, question_id=qid)
     return (
-        f"Question queued at {out_path}. "
-        "Human should drop a .txt response in human_inbox/ with matching timestamp or latest file."
+        f"Question queued (question_id={qid}) at {out_path.name}. "
+        f"Human should respond in human_inbox/ as response_{qid}.txt"
     )
 
 
@@ -284,20 +292,29 @@ class AskHumanInput(BaseModel):
 
 
 def get_tools() -> list[StructuredTool]:
-    """Return all agent tools as LangChain StructuredTools."""
-    return [
+    """Return agent tools allowed for the current AGENT_MODE."""
+    tools = [
         StructuredTool.from_function(read_file, name="read_file", args_schema=ReadFileInput),
-        StructuredTool.from_function(write_file, name="write_file", args_schema=WriteFileInput),
         StructuredTool.from_function(list_directory, name="list_directory", args_schema=ListDirInput),
-        StructuredTool.from_function(run_shell, name="run_shell", args_schema=ShellInput),
-        StructuredTool.from_function(run_python, name="run_python", args_schema=PythonInput),
-        StructuredTool.from_function(git_command, name="git_command", args_schema=GitInput),
-        StructuredTool.from_function(docker_command, name="docker_command", args_schema=DockerInput),
         StructuredTool.from_function(web_search, name="web_search", args_schema=WebSearchInput),
         StructuredTool.from_function(store_memory, name="store_memory", args_schema=MemoryStoreInput),
         StructuredTool.from_function(search_memory, name="search_memory", args_schema=MemorySearchInput),
         StructuredTool.from_function(ask_human, name="ask_human", args_schema=AskHumanInput),
     ]
+    if is_write_allowed(settings.agent_mode):
+        tools.extend(
+            [
+                StructuredTool.from_function(write_file, name="write_file", args_schema=WriteFileInput),
+                StructuredTool.from_function(run_shell, name="run_shell", args_schema=ShellInput),
+                StructuredTool.from_function(run_python, name="run_python", args_schema=PythonInput),
+                StructuredTool.from_function(git_command, name="git_command", args_schema=GitInput),
+            ]
+        )
+    elif settings.agent_mode == "observe":
+        tools.append(StructuredTool.from_function(run_shell, name="run_shell", args_schema=ShellInput))
+    if is_docker_tool_enabled(settings.enable_docker_tool, settings.agent_mode):
+        tools.append(StructuredTool.from_function(docker_command, name="docker_command", args_schema=DockerInput))
+    return tools
 
 
 def tools_by_name() -> dict[str, Any]:

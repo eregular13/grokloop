@@ -1,5 +1,7 @@
-# LocalGrokLoop — 24/7 local autonomous agent stack
-# Usage: docker compose up --build -d
+# GrokLoop — safe-by-default local agent stack
+# Usage:  docker compose up --build -d
+# Operator mode (docker socket + project write):
+#         docker compose -f docker-compose.yml -f docker-compose.operator.yml up -d
 
 name: localgrokloop
 
@@ -19,12 +21,16 @@ x-agent-env: &agent-env
   LOOP_SLEEP_SECONDS: ${LOOP_SLEEP_SECONDS:-30}
   HEARTBEAT_SECONDS: ${HEARTBEAT_SECONDS:-60}
   MAX_ITERATIONS_PER_GOAL: ${MAX_ITERATIONS_PER_GOAL:-50}
+  MAX_GOAL_ELAPSED_SECONDS: ${MAX_GOAL_ELAPSED_SECONDS:-3600}
+  MAX_CONSECUTIVE_FAILURES: ${MAX_CONSECUTIVE_FAILURES:-5}
   SELF_EDIT_MODE: ${SELF_EDIT_MODE:-false}
+  ENABLE_DOCKER_TOOL: ${ENABLE_DOCKER_TOOL:-false}
+  AGENT_MODE: ${AGENT_MODE:-edit}
+  SEED_DEFAULT_GOAL: ${SEED_DEFAULT_GOAL:-false}
   TOOL_TIMEOUT_SECONDS: ${TOOL_TIMEOUT_SECONDS:-120}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
 
 services:
-  # ── Vector memory ──────────────────────────────────────────────
   chromadb:
     image: chromadb/chroma:1.0.15
     restart: unless-stopped
@@ -35,7 +41,7 @@ services:
       PERSIST_DIRECTORY: /chroma/chroma
       ANONYMIZED_TELEMETRY: "FALSE"
     ports:
-      - "8100:8000"
+      - "127.0.0.1:8100:8000"
     networks:
       - loopnet
     healthcheck:
@@ -45,7 +51,6 @@ services:
       retries: 8
       start_period: 30s
 
-  # ── Task queue / state cache ───────────────────────────────────
   redis:
     image: redis:7-alpine
     restart: unless-stopped
@@ -60,16 +65,16 @@ services:
       timeout: 3s
       retries: 5
 
-  # ── Local web search (optional, no API keys) ───────────────────
   searxng:
-    image: searxng/searxng:latest
+    image: searxng/searxng:2025.5.12-7ca24eee8
     restart: unless-stopped
     volumes:
       - ./config/searxng:/etc/searxng:rw
     environment:
-      SEARXNG_BASE_URL: http://localhost:8888/
+      SEARXNG_BASE_URL: http://127.0.0.1:8888/
+      SEARXNG_SECRET: ${SEARXNG_SECRET:-change-me-in-env}
     ports:
-      - "8888:8080"
+      - "127.0.0.1:8888:8080"
     networks:
       - loopnet
     cap_drop:
@@ -79,7 +84,6 @@ services:
       - SETGID
       - SETUID
 
-  # ── Main agent daemon ──────────────────────────────────────────
   agent:
     build:
       context: ./agent
@@ -95,11 +99,7 @@ services:
       - ./data:/data
       - ./human_inbox:/human_inbox
       - ./human_outbox:/human_outbox
-      - ./agent:/app/agent_src:ro
-      # Mount project root so agent can self-edit when SELF_EDIT_MODE=true
-      - .:/project:rw
-      # Docker socket for container control (optional — disable if undesired)
-      - /var/run/docker.sock:/var/run/docker.sock
+      # NO project root mount and NO docker.sock in safe default mode
     depends_on:
       chromadb:
         condition: service_healthy
@@ -109,16 +109,7 @@ services:
       - "host.docker.internal:host-gateway"
     networks:
       - loopnet
-    # Uncomment for NVIDIA GPU passthrough (Linux/WSL2 with nvidia-container-toolkit):
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all
-    #           capabilities: [gpu]
 
-  # ── Web dashboard ──────────────────────────────────────────────
   dashboard:
     build:
       context: ./dashboard
@@ -132,6 +123,7 @@ services:
       HUMAN_OUTBOX: /human_outbox
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:14b}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
     volumes:
       - ./data:/data:ro
       - ./tasks:/tasks
@@ -139,7 +131,7 @@ services:
       - ./human_outbox:/human_outbox
       - ./workspace:/workspace:ro
     ports:
-      - "8501:8501"
+      - "127.0.0.1:8501:8501"
     depends_on:
       - redis
       - agent
@@ -151,5 +143,3 @@ services:
 networks:
   loopnet:
     driver: bridge
-
-volumes: {}

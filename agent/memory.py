@@ -87,18 +87,29 @@ class MemoryStore:
             )
         return memories
 
-    def format_context(self, query: str, *, goal_id: str = "") -> str:
-        """Format retrieved memories as context for the LLM."""
-        hits = self.search(query, goal_id=goal_id)
-        if not hits:
+    def format_context(self, query: str, *, goal_id: str = "", include_global: bool = True) -> str:
+        """Format goal-specific and global memories as context for the LLM."""
+        goal_hits = self.search(query, goal_id=goal_id, top_k=4) if goal_id else []
+        global_hits = self.search(query, goal_id="", top_k=4) if include_global else []
+
+        if not goal_hits and not global_hits:
             return "No relevant memories found."
 
-        lines = ["## Relevant memories"]
-        for hit in hits:
-            meta = hit.get("metadata", {})
-            ts = meta.get("timestamp", "unknown")
-            mtype = meta.get("type", "note")
-            lines.append(f"- [{mtype} @ {ts}] {hit['content']}")
+        lines: list[str] = []
+        if goal_hits:
+            lines.append("## Goal-specific memories")
+            for hit in goal_hits:
+                meta = hit.get("metadata", {})
+                lines.append(f"- [{meta.get('type', 'note')}] {hit['content'][:400]}")
+        if global_hits:
+            lines.append("## Global/project memories")
+            seen = {h["id"] for h in goal_hits}
+            for hit in global_hits:
+                if hit["id"] in seen:
+                    continue
+                meta = hit.get("metadata", {})
+                gid = meta.get("goal_id", "global")
+                lines.append(f"- [{meta.get('type', 'note')} goal={gid}] {hit['content'][:400]}")
         return "\n".join(lines)
 
     def count(self) -> int:
