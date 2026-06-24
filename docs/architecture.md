@@ -2,9 +2,14 @@
 
 ## Overview
 
-GrokLoop is a **bounded agent execution loop** implemented as a LangGraph state machine,
-backed by persistent memory and a Redis task queue. It is designed for local, offline
-operation with explicit stopping conditions and human-in-the-loop gates.
+GrokLoop has two loop layers:
+
+1. **`agent/loop_engine/`** — pure, deterministic orchestration over Protocol interfaces.
+   Fully testable with fakes. No LangGraph/Ollama/Redis/Chroma imports.
+2. **`agent/agent_loop.py`** — LangGraph production adapter with Ollama, ChromaDB,
+   SQLite checkpoints, and LangChain tools.
+
+The daemon uses layer 2 today. Layer 1 is the contract layer 2 will converge toward.
 
 ## State machine
 
@@ -36,11 +41,12 @@ Evaluate stopping conditions (budget.py + decide node)
 | Component | Module | Responsibility |
 |-----------|--------|----------------|
 | **Model provider** | `langchain_ollama` | Sends LLM requests, normalizes responses |
-| **Loop controller** | `agent_loop.py` | LangGraph nodes, routing, checkpointing |
+| **Loop engine** | `loop_engine/engine.py` | Deterministic phase orchestration |
+| **Loop controller (prod)** | `agent_loop.py` | LangGraph nodes, routing, checkpointing |
 | **Tool registry** | `tools.py` | Typed tool definitions, argument schemas |
 | **Policy layer** | `tools.py` | Path restrictions, blocklists, sandbox |
 | **State store** | `memory.py`, SQLite checkpointer | Vector memory + graph checkpoints |
-| **Budget manager** | `budget.py` | Iteration, time, failure limits |
+| **Budget manager** | `loop_engine/budget.py`, `budget.py` | Iteration, time, tool-call limits |
 | **Observer** | `observability.py` | Run ID, step ID, structured JSONL events |
 | **Task intake** | `task_watcher.py` | Redis queue, filesystem watcher |
 | **Human gate** | `human_gate.py` | Pause/resume on human input |
@@ -108,3 +114,22 @@ Each goal run receives a `run_id`. Each graph step emits structured events:
 ```
 
 Events are appended to `data/logs/agent_cycles.jsonl`. Full prompts are not logged by default.
+
+## Loop engine interfaces
+
+```text
+LoopEngine
+  ├── Planner.plan(state) -> str
+  ├── Actor.act(state) -> (summary, tool_calls)
+  ├── ToolExecutor.execute(state, call) -> ToolResultRecord
+  ├── Reflector.reflect(state) -> (reflection, decision?)
+  ├── MemoryStore.observe/store
+  ├── CheckpointStore.save/load  # resume support
+  ├── EventSink.emit             # ordered step_id
+  └── ApprovalGate.park          # ask_human without blocking worker
+```
+
+## Run replay (stub)
+
+`loop_engine/replay.py` loads JSONL events and summarizes phase order. Full step replay UI
+is deferred; use `data/logs/agent_cycles.jsonl` for inspection today.

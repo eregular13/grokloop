@@ -12,6 +12,8 @@ import pandas as pd
 import redis
 import streamlit as st
 
+from task_submit import build_task_payload
+
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379/0")
 DATA_PATH = Path(os.getenv("DATA_PATH", "/data"))
 TASKS_PATH = Path(os.getenv("TASKS_PATH", "/tasks"))
@@ -98,12 +100,7 @@ with st.form("submit_goal"):
     )
     submitted = st.form_submit_button("Queue goal", type="primary")
     if submitted and goal_text.strip():
-        payload = {
-            "goal_id": __import__("hashlib").sha256(goal_text.encode()).hexdigest()[:12],
-            "goal": goal_text.strip(),
-            "source": "dashboard",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
+        payload = build_task_payload(goal_text.strip(), source="dashboard")
         r.rpush("localgrokloop:task_queue", json.dumps(payload))
         r.lpush("localgrokloop:task_history", json.dumps({**payload, "status": "queued"}))
         st.success(f"Queued goal `{payload['goal_id']}`")

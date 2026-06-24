@@ -105,11 +105,47 @@ docker compose logs -f agent
 cat data/logs/agent_cycles.jsonl | tail -5
 ```
 
+## Loop engine (testable core)
+
+`agent/loop_engine/` is a **pure Python loop engine** testable without Ollama, LangGraph,
+Redis, ChromaDB, Docker, or live web search. It orchestrates:
+
+```text
+observe → plan → act → tools → reflect → store → decide → (continue | finish)
+```
+
+via narrow Protocol interfaces (`Planner`, `Actor`, `Reflector`, `ToolExecutor`, etc.).
+
+| Layer | Module | Role |
+|-------|--------|------|
+| **Loop engine** | `agent/loop_engine/` | Deterministic orchestration + budget + events |
+| **LangGraph daemon** | `agent/agent_loop.py` | Production adapter (Ollama + tools + checkpoints) |
+| **Policy** | `agent/policy.py` | Path + shell mode gating |
+
+Run engine tests (no external services):
+
+```bash
+pip install -r agent/requirements.txt -r requirements-dev.txt
+pytest tests/unit/test_loop_engine.py -v
+python examples/minimal_loop_engine.py
+```
+
+Inspect a run (stub replay):
+
+```python
+from loop_engine.replay import load_events, summarize_run
+```
+
+LangGraph-specific code remains in `agent_loop.py` until adapters bridge engine interfaces
+to Ollama/Chroma/Redis.
+
 ## Project layout
 
 ```text
 grokloop/
-├── agent/           # LangGraph loop, tools, memory, config
+├── agent/
+│   ├── loop_engine/ # Deterministic testable loop core
+│   ├── agent_loop.py # LangGraph production daemon
 ├── dashboard/       # Streamlit UI
 ├── config/          # SearXNG settings
 ├── tasks/           # Drop goal .txt files here
@@ -171,8 +207,11 @@ GrokLoop executes **model-proposed actions** on your machine. Treat model output
 ## Development
 
 ```bash
-pip install -r agent/requirements.txt pytest
-PYTHONPATH=agent pytest tests/ -v
+pip install -r agent/requirements.txt -r requirements-dev.txt
+ruff check agent dashboard tests
+python -m compileall agent dashboard
+PYTHONPATH=agent:dashboard pytest tests/ -v
+docker compose config --quiet
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).

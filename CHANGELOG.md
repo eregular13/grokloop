@@ -6,6 +6,15 @@ Format based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Unreleased]
 
+### Added
+
+- `agent/loop_engine/` — deterministic testable loop engine (models, interfaces, engine, budget, events, replay, testing fakes)
+- 19 new loop engine tests + task payload parity tests
+- `agent/task_payload.py` + `dashboard/task_submit.py` UUID task semantics
+- `examples/minimal_loop_engine.py` fake-component demo
+- `requirements-dev.txt` with pytest + ruff
+- CI: ruff lint, compileall dashboard, advisory audit label
+
 ### Security
 
 - Remove Docker socket and `/project` mount from default Compose

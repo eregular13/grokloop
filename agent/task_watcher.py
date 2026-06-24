@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import time
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -15,6 +13,7 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 from config import settings
+from task_payload import build_task_payload, goal_content_hash, new_goal_id
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +37,7 @@ class Task:
         self.goal_id = goal_id
         self.goal = goal
         self.source = source
-        self.goal_hash = goal_hash or _goal_hash(goal)
+        self.goal_hash = goal_hash or goal_content_hash(goal)
         self.thread_id = thread_id or f"goal_{goal_id}"
         self.question_id = question_id
         self.created_at = datetime.now(timezone.utc).isoformat()
@@ -68,14 +67,6 @@ class Task:
         return t
 
 
-def _new_goal_id() -> str:
-    return uuid.uuid4().hex[:16]
-
-
-def _goal_hash(goal: str) -> str:
-    return hashlib.sha256(goal.encode()).hexdigest()[:16]
-
-
 def get_redis() -> redis.Redis:
     return redis.from_url(settings.redis_url, decode_responses=True)
 
@@ -87,7 +78,8 @@ def queue_length() -> int:
 def enqueue_task(goal: str, source: str = "cli", *, goal_id: str = "") -> Task:
     """Add a goal to the Redis task queue with a unique ID."""
     r = get_redis()
-    task = Task(goal_id or _new_goal_id(), goal, source)
+    payload = build_task_payload(goal, source, goal_id=goal_id)
+    task = Task.from_dict(payload)
     r.rpush(TASK_QUEUE_KEY, json.dumps(task.to_dict()))
     r.lpush(TASK_HISTORY_KEY, json.dumps({**task.to_dict(), "status": "queued"}))
     r.ltrim(TASK_HISTORY_KEY, 0, 99)

@@ -16,22 +16,29 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: agent/requirements.txt
+          cache-dependency-path: |
+            agent/requirements.txt
+            requirements-dev.txt
 
       - name: Install dependencies
         run: |
-          pip install -r agent/requirements.txt pytest
+          pip install -r agent/requirements.txt -r requirements-dev.txt
+
+      - name: Ruff lint
+        run: ruff check agent dashboard tests examples
 
       - name: Compile check
-        run: python -m compileall agent
+        run: python -m compileall agent dashboard
 
       - name: Unit tests
         run: pytest tests/ -v
         env:
-          PYTHONPATH: agent
+          PYTHONPATH: agent:dashboard
 
-      - name: Dependency audit
-        run: pip install pip-audit && pip-audit -r agent/requirements.txt || true
+      - name: Dependency audit (advisory)
+        run: |
+          echo "::notice::Dependency audit is advisory — failures do not block CI"
+          pip install pip-audit && pip-audit -r agent/requirements.txt || true
 
   compose-validate:
     runs-on: ubuntu-latest

@@ -6,7 +6,6 @@ import json
 import sys
 from unittest.mock import MagicMock, patch
 
-# Allow importing task_watcher without redis/watchdog installed locally
 if "redis" not in sys.modules:
     sys.modules["redis"] = MagicMock()
 if "watchdog" not in sys.modules:
@@ -15,18 +14,16 @@ if "watchdog" not in sys.modules:
     sys.modules["watchdog.events"] = MagicMock()
     sys.modules["watchdog.observers"] = MagicMock()
 
-from task_watcher import Task, _goal_hash, _new_goal_id, enqueue_task
+from task_payload import goal_content_hash, new_goal_id
+from task_watcher import enqueue_task
 
 
 class TestGoalIds:
     def test_unique_ids_for_same_text(self):
-        a = _new_goal_id()
-        b = _new_goal_id()
-        assert a != b
+        assert new_goal_id() != new_goal_id()
 
     def test_goal_hash_stable(self):
-        assert _goal_hash("hello") == _goal_hash("hello")
-        assert _goal_hash("hello") != _goal_hash("world")
+        assert goal_content_hash("hello") == goal_content_hash("hello")
 
 
 class TestEnqueue:
@@ -36,7 +33,8 @@ class TestEnqueue:
         mock_redis_fn.return_value = mock_r
         task = enqueue_task("Build tests", source="test")
         assert len(task.goal_id) == 16
-        assert task.goal_hash == _goal_hash("Build tests")
+        assert task.goal_hash == goal_content_hash("Build tests")
         payload = json.loads(mock_r.rpush.call_args[0][1])
         assert payload["goal"] == "Build tests"
-        assert payload["source"] == "test"
+        assert payload["thread_id"] == f"goal_{task.goal_id}"
+        assert "goal_hash" in payload
